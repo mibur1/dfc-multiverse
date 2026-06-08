@@ -14,7 +14,6 @@ import pandas as pd
 import seaborn as sns
 import networkx as nx
 from scipy import stats
-import statsmodels.api as sm
 from jinja2 import Template
 from tqdm.auto import tqdm
 from matplotlib import transforms
@@ -630,12 +629,12 @@ class Multiverse:
 
         return self.get_results(as_df=True)
 
-    def integrate(self, measure=None, method="uniform", type="mean", agg="mean", bic_column=None):
+    def integrate(self, measure=None, method="uniform", type="mean", agg="mean"):
         """
         Integrate the multiverse results for a specific measure into a single weighted estimate.
 
-        Weighting schemes follow Cantone & Tomaselli (2024); the decision-based schemes
-        (myh/myhn/mli) require the decision columns, which are loaded via ``expand_dec=True``.
+        Weighting schemes follow Cantone & Tomaselli (2024); the decision-based scheme
+        (mli) requires the decision columns, which are loaded via ``expand_dec=True``.
 
         Parameters
         ----------
@@ -644,11 +643,6 @@ class Multiverse:
         method : string
             Weighting scheme. Options are:
                  - "uniform" (default): equal weights across all universes
-                 - "bma": Bayesian model averaging (requires per-universe BIC; pass the column
-                   name via ``bic_column``)
-                 - "myh": Muñoz-Young-Holsteen influence score (specifications built from the
-                   most influential decisions get more weight)
-                 - "myhn": inverse of myh (simpler/robust specifications get more weight)
                  - "mli": maximum local influence (specifications whose neighbours -- by
                    Gower distance over the decisions -- give similar estimates get more weight)
         type : string
@@ -656,8 +650,6 @@ class Multiverse:
         agg : string
             Aggregation applied per universe when the measure holds sequences (arrays) rather
             than scalars. One of "mean" (default), "median", "first", "last".
-        bic_column : string or None
-            Name of the column holding per-universe BIC values. Required for ``method="bma"``.
 
         Returns
         -------
@@ -667,7 +659,6 @@ class Multiverse:
         results = self.get_results(as_df=True, expand_dec=True)
         results.columns = results.columns.str.lower()
         measure = measure.lower() if measure else None
-        bic_column = bic_column.lower() if bic_column else None
 
         if measure is None:
             raise ValueError("Please provide a measure to integrate.")
@@ -675,7 +666,7 @@ class Multiverse:
             raise ValueError(f"The measure '{measure}' was not found in the results.")
 
         x = self._get_measure_values(results, measure, agg=agg)
-        weights = self._compute_weights(results, measure, method, agg=agg, bic_column=bic_column)
+        weights = self._compute_weights(results, measure, method, agg=agg)
 
         if type == "mean":
             integrated_estimate = self._weighted_mean(x, weights)
@@ -686,7 +677,7 @@ class Multiverse:
 
         return integrated_estimate, weights
 
-    def compare_integration(self, measure, true_value=None, agg="mean", bic_column=None, sigfigs=3):
+    def compare_integration(self, measure, true_value=None, agg="mean", sigfigs=3):
         """
         Compare all integration schemes for a measure and return a summary table.
 
@@ -698,9 +689,6 @@ class Multiverse:
             If given, absolute errors of each estimate against this value are added.
         agg : string
             Per-universe aggregation for sequence-valued measures (see ``integrate``).
-        bic_column : string or None
-            Name of the column holding per-universe BIC values. BMA is only computed when this
-            is provided; otherwise the BMA row is skipped.
         sigfigs : int or None
             Round the numeric table columns to this many significant figures (default 3).
             Use None to keep full precision. Only affects the table; ``weights`` is unrounded.
@@ -709,57 +697,31 @@ class Multiverse:
         -------
         tuple
             (table : pandas.DataFrame, weights : dict[str, np.ndarray])
-            The table has one row per scheme with the weighted median/mean, the Gini
-            coefficient of the weights (0 = uniform, 1 = concentrated), the estimate of the
-            highest-weight universe (``highest_w``) and which universe that is
-            (``highest_w_universe``). When the maximum weight is not unique, ``highest_w`` is
-            NaN; ``highest_w_universe`` is NaN if every universe ties (uniform) or otherwise
-            lists the tied universes. Schemes that cannot be computed (e.g. BMA without a
-            'bic' column) are skipped with a message.
+            The table has one row per scheme with the weighted median/mean and the Gini
+            coefficient of the weights (0 = uniform, 1 = concentrated). If ``true_value`` is
+            given, absolute errors of the median/mean are added (``err_median``, ``err_mean``).
         """
         results = self.get_results(as_df=True, expand_dec=True)
         results.columns = results.columns.str.lower()
         measure = measure.lower()
-        bic_column = bic_column.lower() if bic_column else None
         if measure not in results.columns:
             raise ValueError(f"The measure '{measure}' was not found in the results.")
 
         y = self._get_measure_values(results, measure, agg=agg)
-        schemes = [("Uniform", "uniform"), ("BMA", "bma"), ("MYH", "myh"),
-                   ("MYHN", "myhn"), ("MLI", "mli")]
+        schemes = [("Uniform", "uniform"), ("MLI", "mli")]
 
         rows, weights = [], {}
         for name, method in schemes:
-            
-            # Skip bma if bic column is not provided or not found
-            if name == "BMA":
-                if bic_column is None or (bic_column is not None and bic_column not in results.columns):
-                    continue
-
-            w = self._compute_weights(results, measure, method, agg=agg, bic_column=bic_column)
+            w = self._compute_weights(results, measure, method, agg=agg)
 
             y_median = self._weighted_median(y, w)
             y_mean = self._weighted_mean(y, w)
 
-            # The "highest weight" universe is only defined when the top weight is unique;
-            # for uniform (and any tie at the maximum) it is undefined -> NaN.
-            top = np.flatnonzero(w == w.max())           # universe(s) carrying the max weight
-            unis = results["universe"]
-            if top.size == 1:
-                y_maxw = float(y[top[0]])
-                uni_maxw = unis.iloc[top[0]]                          # e.g. "137"
-            else:
-                # not unique -> no single estimate. every universe tied (uniform) -> NaN;
-                # a partial tie (only possible for the other schemes) -> list the tied universes.
-                y_maxw = np.nan
-                uni_maxw = np.nan if top.size == len(w) else unis.iloc[top].tolist()
-
             row = {"Scheme": name, "median": y_median, "mean": y_mean,
-                   "gini_w": self._gini(w), "highest_w": y_maxw, "highest_w_universe": uni_maxw}
+                   "gini_w": self._gini(w)}
             if true_value is not None:
                 row["err_median"] = abs(y_median - true_value)
                 row["err_mean"] = abs(y_mean - true_value)
-                row["err_highest_w"] = abs(y_maxw - true_value)
             rows.append(row)
             weights[name] = w
 
@@ -991,6 +953,17 @@ class Multiverse:
         def _map_name(key: str) -> str:
             return name_map.get(key, key) if isinstance(name_map, dict) else key
 
+        def _map_level(decision: str, lvl) -> str:
+            # Option/level labels. Prefer a decision-qualified key ("decision/option") so the same
+            # option string can be relabelled differently per decision, then fall back to a bare
+            # key, then the raw value.
+            if not isinstance(name_map, dict):
+                return str(lvl)
+            qualified = f"{decision}/{lvl}"
+            if qualified in name_map:
+                return str(name_map[qualified])
+            return str(name_map.get(lvl, lvl))
+
         def _extract_decision_order(decisions_obj) -> list[str]:
             if not isinstance(decisions_obj, dict):
                 return []
@@ -1170,7 +1143,7 @@ class Multiverse:
 
             for opt in options:
                 yticks.append(y_max)
-                display_labels.append(str(opt))
+                display_labels.append(_map_level(decision, opt))
                 decision_positions[(decision, opt)] = (y_max, group_idx)
                 y_max += 1
 
@@ -1326,6 +1299,8 @@ class Multiverse:
             sig_col: str | None = None,
             sig_threshold: float = 0.05,
             baseline: float | None = None,
+            reference: float | None = None,
+            reference_label: str | None = None,
             name_map: dict | None = None,
             figsize: tuple = (7, 9),
             fname: str = "multiverse_plot",
@@ -1369,9 +1344,19 @@ class Multiverse:
             Baseline value for the outcome. If provided, a vertical dashed reference line is
             drawn at this value (extending through the strips to the x-axis), and it is the null
             used for the one-sample t-test when significance is computed (defaults to 0).
+        reference : float | None, optional
+            A single reference outcome value to highlight on the density curve, e.g. the estimate
+            of one specific universe (such as a previously published single-pipeline study). It is
+            drawn as a marker sitting on the density at that x-position, showing where that single
+            result falls within the full multiverse distribution.
+        reference_label : str | None, optional
+            Legend label for ``reference`` (e.g. ``"Popp et al."``). Defaults to ``"Reference"``.
         name_map : dict | None, optional
-            Optional mapping for display names. Keys may include the measure name
-            and decision names. Values are the desired display labels.
+            Optional mapping for display names. Keys may include the measure name, decision names,
+            and option/level values. Values are the desired display labels. When the same option
+            string is used by more than one decision, use a decision-qualified key
+            ``"decision/option"`` (e.g. ``"family_splitting/all"``) to relabel it per decision;
+            otherwise a bare option key (e.g. ``"spearman"``) is applied wherever it appears.
         figsize : tuple, optional
             Figure size passed to Matplotlib (width, height) in inches.
         ftype : str, optional
@@ -1388,6 +1373,17 @@ class Multiverse:
         # Helpers
         def _map_name(key: str) -> str:
             return name_map.get(key, key) if isinstance(name_map, dict) else key
+
+        def _map_level(decision: str, lvl) -> str:
+            # Option/level labels. Prefer a decision-qualified key ("decision/option") so the same
+            # option string can be relabelled differently per decision (e.g. "all" under
+            # family_splitting vs movie_frames), then fall back to a bare key, then the raw value.
+            if not isinstance(name_map, dict):
+                return str(lvl)
+            qualified = f"{decision}/{lvl}"
+            if qualified in name_map:
+                return str(name_map[qualified])
+            return str(name_map.get(lvl, lvl))
 
         def _kde_density(values, grid, x_min, x_max):
             values = np.asarray(values, dtype=float)
@@ -1549,6 +1545,13 @@ class Multiverse:
         if y_sig_scaled is not None:
             ax_density.fill_between(grid_x, y_sig_scaled, alpha=0.4, label="Significant", color="tomato")
 
+        # Reference value (e.g. one published single-pipeline estimate) as a dot on the density
+        if reference is not None:
+            y_ref = float(np.interp(reference, grid_x, y_all))
+            ax_density.plot([reference], [y_ref], marker="o", markersize=8, linestyle="none",
+                            color="black", zorder=5,
+                            label=reference_label if reference_label else "Reference")
+
         ax_density.set_xlim(*common_xlim)
         ax_density.set_xticks([])
         ax_density.set_xticklabels([])
@@ -1604,7 +1607,8 @@ class Multiverse:
             # y ticks
             ytick_pos = [0.5, 1.5] + [i + 2.5 for i in range(n_levels)]
             display_name = {c: c.replace("__", "", 1) for c in dec_only_df.columns}
-            ytick_labels = ["", _map_name(display_name[varname])] + [str(lvl) for lvl in levels]
+            dname = display_name[varname]
+            ytick_labels = ["", _map_name(dname)] + [_map_level(dname, lvl) for lvl in levels]
             ax.set_yticks(ytick_pos)
             ax.set_yticklabels(ytick_labels)
 
@@ -1649,10 +1653,11 @@ class Multiverse:
             true_value=None, 
             agg="mean",
             xlim=None,
+            xlabel=None,
             figsize=(7, 3),
             title=None,
-            fname="weighted_posterior",
-            ftype="png",
+            fname="density",
+            ftype="pdf",
             dpi=300):
         """
         Plot weighted density distributions of a measure for each integration scheme.
@@ -1685,17 +1690,15 @@ class Multiverse:
         if weights is None:
             _, weights = self.compare_integration(measure, true_value=true_value, agg=agg)
 
-        bw_adjust = {"Uniform": 1, "BMA": 2, "MYH": 1, "MYHN": 1, "MLI": 1}
-        colors = {"Uniform": "black", "BMA": "red", "MYH": "purple", "MYHN": "orange", "MLI": "green"}
+        bw_adjust = {"Uniform": 1, "MLI": 1}
+        colors = {"Uniform": "black", "MLI": "green"}
 
         fig, ax = plt.subplots(figsize=figsize)
         if xlim is None:
             margin = (y.max() - y.min()) * 0.1
             xlim = (y.min() - margin, y.max() + margin)
-        ax.set(xlabel=measure, ylabel="Density", xlim=xlim)
-        if title is None:
-            ax.set_title(f"Weighted posterior distributions for {measure}")
-        else:
+        ax.set(xlabel=xlabel or measure, ylabel="Density", xlim=xlim)
+        if title is not None:
             ax.set_title(title)
 
         if true_value is not None:
@@ -1999,20 +2002,14 @@ class Multiverse:
 
     # Multiverse integration
     def _compute_weights(self, results: pd.DataFrame, measure: str, method: str,
-                         agg: str = "mean", bic_column: str|None = None) -> np.ndarray:
-        """Compute weights with the requested weighting scheme. Shared by integrate() and compare_methods()."""
+                         agg: str = "mean") -> np.ndarray:
+        """Compute weights with the requested weighting scheme. Shared by integrate() and compare_integration()."""
         if method == "uniform":
             return self._uniform_weights(results)
-        elif method == "bma":
-            return self._bma_weights(results, bic_column=bic_column)
-        elif method == "myh":
-            return self._myh_weights(results, measure, agg=agg, negative=False)
-        elif method == "myhn":
-            return self._myh_weights(results, measure, agg=agg, negative=True)
         elif method == "mli":
             return self._mli_weights(results, measure, agg=agg)
         else:
-            raise ValueError("method must be 'uniform', 'bma', 'myh', 'myhn', or 'mli'")
+            raise ValueError("method must be 'uniform' or 'mli'")
         
     def _weighted_mean(self,x: np.ndarray, w: np.ndarray) -> float:
         """
@@ -2037,47 +2034,6 @@ class Multiverse:
         """Compute uniform weights for all universes."""
         n = len(data)
         return np.full(n, 1.0 / n, dtype=float)
-
-    def _bma_weights(self, data: pd.DataFrame, bic_column: str) -> np.ndarray:
-        """Compute normalised BMA weights from BIC values (Cantone & Tomaselli 2024)."""
-        bic = data[bic_column].to_numpy(float)
-        delta = bic - np.min(bic)
-        w = np.exp(-0.5 * delta)
-        return w / w.sum()
-
-    def _myh_weights(self, data: pd.DataFrame, measure: str, agg: str = "mean", negative: bool = False) -> np.ndarray:
-        """
-        Muñoz-Young-Holsteen weights (Cantone & Tomaselli 2024).
-
-        Regresses the measure on the decision features (OLS); each universe's contribution
-        Cj combines the intercept with the decision effects active in that universe. Weights
-        are proportional to Cj ('myh') or to its complement ('myhn').
-
-        If the decision design is rank-deficient (collinear/confounded decisions that are not
-        freely crossed), the redundant columns are dropped before the regression and a warning
-        is issued -- otherwise the OLS coefficients, and hence the influence scores, would be
-        arbitrary (e.g. huge near-cancelling values that make every universe tie).
-        """
-        y = self._get_measure_values(data, measure, agg=agg)
-        X_dec, _, names = self._get_decision_matrix(data)     # (n, k)
-
-        # Drop collinear columns so the OLS design (including the intercept) is full rank.
-        Xc = sm.add_constant(X_dec, has_constant="add")
-        dummy_keep = self._independent_columns(Xc)[1:]        # mask over the dummy columns
-        if not dummy_keep.all():
-            dropped = [nm for nm, k in zip(names, dummy_keep) if not k]
-            print(f"[warn] Rank-deficient design (collinear decisions); dropping {len(dropped)} redundant column(s) before the MYH regression: {dropped}.")
-            X_dec = X_dec[:, dummy_keep]
-            Xc = sm.add_constant(X_dec, has_constant="add")
-
-        fit = sm.OLS(y, Xc).fit()
-        alpha = float(fit.params[0])
-        beta_q = fit.params[1:]                               # length = kept dummies
-        Cj = np.sqrt(alpha ** 2 + (X_dec * (beta_q ** 2)).sum(axis=1))
-        num = (Cj.max() - Cj) if negative else Cj
-        s = num.sum()
-        n = len(num)
-        return np.full(n, 1.0 / n) if s == 0 else num / s
 
     def _mli_weights(self, data: pd.DataFrame, measure: str, agg: str = "mean") -> np.ndarray:
         """
@@ -2156,23 +2112,6 @@ class Multiverse:
 
         matrix = pd.concat(parts, axis=1).to_numpy(dtype=float)
         return matrix, col_types, col_names
-
-    def _independent_columns(self, M: np.ndarray) -> np.ndarray:
-        """
-        Greedily flag a maximal set of linearly independent columns of ``M`` (keeping earlier
-        columns first). Returns a boolean mask; False marks columns that are linear combinations
-        of the kept ones -- used to drop collinear decision dummies before the MYH regression.
-        """
-        keep = np.zeros(M.shape[1], dtype=bool)
-        basis = np.empty((M.shape[0], 0))
-        rank = 0
-        for j in range(M.shape[1]):
-            cand = np.column_stack([basis, M[:, j]])
-            r = int(np.linalg.matrix_rank(cand))
-            if r > rank:
-                basis, rank = cand, r
-                keep[j] = True
-        return keep
 
     def _gower_distance(self, Q: np.ndarray, col_types: list) -> np.ndarray:
         """
