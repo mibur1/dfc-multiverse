@@ -633,8 +633,8 @@ class Multiverse:
         """
         Integrate the multiverse results for a specific measure into a single weighted estimate.
 
-        Weighting schemes follow Cantone & Tomaselli (2024); the decision-based scheme
-        (mli) requires the decision columns, which are loaded via ``expand_dec=True``.
+        Weighting schemes follow Cantone & Tomaselli (2024); the decision-based schemes
+        (mli, mli_restricted) require the decision columns, which are loaded via ``expand_dec=True``.
 
         Parameters
         ----------
@@ -645,6 +645,10 @@ class Multiverse:
                  - "uniform" (default): equal weights across all universes
                  - "mli": maximum local influence (specifications whose neighbours -- by
                    Gower distance over the decisions -- give similar estimates get more weight)
+                 - "mli_restricted": variant of MLI that ignores decisions not freely crossed
+                   across the multiverse, so the local neighbourhood is comparable across
+                   universes. Use this when the design includes ``remove`` rules that confine
+                   some decisions to a subset of levels.
         type : string
             Type of (weighted) integration. Options are "mean" (default) or "median".
         agg : string
@@ -709,6 +713,8 @@ class Multiverse:
 
         y = self._get_measure_values(results, measure, agg=agg)
         schemes = [("Uniform", "uniform"), ("MLI", "mli")]
+        if self._untestable_decisions(results):
+            schemes.append(("MLI (restricted)", "mli_restricted"))
 
         rows, weights = [], {}
         for name, method in schemes:
@@ -1690,8 +1696,8 @@ class Multiverse:
         if weights is None:
             _, weights = self.compare_integration(measure, true_value=true_value, agg=agg)
 
-        bw_adjust = {"Uniform": 1, "MLI": 1}
-        colors = {"Uniform": "black", "MLI": "green"}
+        bw_adjust = {"Uniform": 1, "MLI": 1, "MLI (restricted)": 1}
+        colors = {"Uniform": "black", "MLI": "green", "MLI (restricted)": "blue"}
 
         fig, ax = plt.subplots(figsize=figsize)
         if xlim is None:
@@ -2007,9 +2013,19 @@ class Multiverse:
         if method == "uniform":
             return self._uniform_weights(results)
         elif method == "mli":
-            return self._mli_weights(results, measure, agg=agg)
+            bad = self._untestable_decisions(results)
+            if bad:
+                bad_names = [d.replace("__", "", 1) for d in bad]
+                print(
+                    f"[warn] Decision design is not fully crossed: {bad_names} are untestable for "
+                    f"some universes, so MLI compares neighbourhoods of unequal coverage and is "
+                    f"biased toward universes blind to those dimensions. Consider method='mli_restricted'."
+                )
+            return self._mli_weights(results, measure, agg=agg, restricted=False)
+        elif method == "mli_restricted":
+            return self._mli_weights(results, measure, agg=agg, restricted=True)
         else:
-            raise ValueError("method must be 'uniform' or 'mli'")
+            raise ValueError("method must be 'uniform', 'mli', or 'mli_restricted'")
         
     def _weighted_mean(self,x: np.ndarray, w: np.ndarray) -> float:
         """
@@ -2035,16 +2051,39 @@ class Multiverse:
         n = len(data)
         return np.full(n, 1.0 / n, dtype=float)
 
-    def _mli_weights(self, data: pd.DataFrame, measure: str, agg: str = "mean") -> np.ndarray:
+    def _mli_weights(self, data: pd.DataFrame, measure: str, agg: str = "mean",
+                     restricted: bool = False) -> np.ndarray:
         """
         Maximum local influence weights (Cantone & Tomaselli 2024).
 
         For each universe, the local instability is the largest change in the measure among
         its nearest neighbours (minimum non-zero Gower distance over the decisions). Weights
         are proportional to the complement of that instability (stable specifications weigh more).
+
+        When ``restricted=True``, decisions that are not freely crossed across the multiverse
+        (i.e. at least one universe has no Hamming-1 neighbour along that decision) are dropped
+        from the distance computation before the nearest-neighbour lookup. This makes the local
+        neighbourhood comparable across universes; without it MLI is biased toward universes
+        blind to the constrained dimensions.
         """
         y = self._get_measure_values(data, measure, agg=agg)
-        Q, col_types, _ = self._get_decision_matrix(data)     # (n, k)
+        Q, col_types, col_names = self._get_decision_matrix(data)     # (n, k)
+
+        if restricted:
+            bad = self._untestable_decisions(data)
+            if bad:
+                keep = np.ones(Q.shape[1], dtype=bool)
+                for j, nm in enumerate(col_names):
+                    if any(nm == d or nm.startswith(d + "_") for d in bad):
+                        keep[j] = False
+                if not keep.any():
+                    raise ValueError(
+                        "Restricted MLI cannot proceed: every decision is untestable somewhere "
+                        "in the design."
+                    )
+                Q = Q[:, keep]
+                col_types = [t for j, t in enumerate(col_types) if keep[j]]
+
         dist = self._gower_distance(Q, col_types)
         n = len(y)
 
@@ -2060,6 +2099,24 @@ class Multiverse:
         num = err.max() - err
         s = num.sum()
         return np.full(n, 1.0 / n) if s == 0 else num / s
+
+    def _untestable_decisions(self, data: pd.DataFrame) -> list:
+        """
+        Return decision columns ('__<name>') for which the design is not freely crossed: i.e.
+        at least one universe has no Hamming-1 neighbour along that decision (fixing all other
+        decisions, only one level of this decision occurs). An empty list means the design is
+        fully crossed and plain MLI is unbiased.
+        """
+        dec_cols = sorted([c for c in data.columns if c.startswith("__")])
+        if len(dec_cols) < 2:
+            return []
+        bad = []
+        for d in dec_cols:
+            others = [c for c in dec_cols if c != d]
+            nunique = data.groupby(others, observed=True)[d].transform("nunique")
+            if (nunique == 1).any():
+                bad.append(d)
+        return bad
 
     def _get_measure_values(self, data: pd.DataFrame, measure: str, agg: str = "mean") -> np.ndarray:
         """
