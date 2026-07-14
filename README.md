@@ -2,11 +2,11 @@
 <img src="src/comet/data/img/logo.svg" width =130 align="right" alt="logo"/>
 </div>
 
-# Comet - A toolbox for dynamic functional connectivity and multiverse analysis
+# Comet: Multiverse analysis for neuroimaging
 
 [![DOI](https://img.shields.io/badge/paper-Imaging_Neuroscience-orange?style=flat&logo=openaccess&logoColor=orange&link=%20https%3A%2F%2Fdoi.org%2F10.1162%2FIMAG.a.1122)](https://doi.org/10.1162/IMAG.a.1122) [![PyPI](https://img.shields.io/badge/PyPI-comet--toolbox-blue?logo=PyPI)](https://pypi.org/project/comet-toolbox/)
-[![Zenodo](https://zenodo.org/badge/745942040.svg)](https://doi.org/10.5281/zenodo.21363315)
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2e766745c5c04d4786ea28f7135c193e)](https://app.codacy.com/gh/mibur1/comet/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade) [![Documentation Status](https://readthedocs.org/projects/comet-toolbox/badge/?version=latest)](https://comet-toolbox.readthedocs.io/en/latest/) [![Coverage Status](https://coveralls.io/repos/github/mibur1/comet/badge.svg)](https://coveralls.io/github/mibur1/comet)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2e766745c5c04d4786ea28f7135c193e)](https://app.codacy.com/gh/mibur1/comet/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade) [![Documentation Status](https://readthedocs.org/projects/comet-toolbox/badge/?version=latest)](https://comet-toolbox.readthedocs.io/en/latest/) [![Coverage Status](https://coveralls.io/repos/github/mibur1/comet/badge.svg)](https://coveralls.io/github/mibur1/comet) [![Zenodo](https://zenodo.org/badge/745942040.svg)](https://doi.org/10.5281/zenodo.21363315)
+
 
 ## About the toolbox
 

@@ -2,7 +2,7 @@
 
     <div style="display: flex; align-items: center;">
         <img src="_static/logo.svg" alt="logo" style="width: 100px; margin-right: 15px;">
-        <h1 style="margin: 0;">Comet - A toolbox for dynamic functional connectivity and multiverse analysis</h1>
+        <h1 style="margin: 0;">Comet: Multiverse analysis for neuroimaging</h1>
     </div>
 
 .. raw:: html
@@ -28,6 +28,11 @@
 .. image:: https://coveralls.io/repos/github/mibur1/comet/badge.svg?branch=main
    :target: https://coveralls.io/github/mibur1/comet?branch=main
    :alt: Coverage Status
+
+.. image:: https://zenodo.org/badge/745942040.svg
+   :target: https://doi.org/10.5281/zenodo.21363315
+   :alt: Zenodo Badge
+
 
 .. raw:: html
 
