@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the accompanying paper (see preferred-citation) or this software record."
+title: "The Comet Toolbox for Multiverse Analyses in Cognitive Neuroscience"
+type: software
+version: 1.3.0
+date-released: 2026-05-27
+url: "https://github.com/mibur1/comet"
+repository-code: "https://github.com/mibur1/comet"
+license: MIT
+authors:
+  - given-names: Micha
+    family-names: Burkhardt
+    email: micha.burkhardt@uol.de
+    orcid: "https://orcid.org/0000-0002-6268-3527"
+    affiliation: "Carl von Ossietzky Universität Oldenburg"
+preferred-citation:
+  type: article
+  title: "The Comet Toolbox: Improving Robustness in Network Neuroscience Through Multiverse Analysis"
+  authors:
+    - given-names: Micha
+      family-names: Burkhardt
+      orcid: "https://orcid.org/0000-0002-6268-3527"
+      affiliation: "Carl von Ossietzky Universität Oldenburg"
+    - given-names: Carsten
+      family-names: "Gießing"
+      affiliation: "Carl von Ossietzky Universität Oldenburg"
+  journal: "Imaging Neuroscience"
+  year: 2026
+  doi: "https://doi.org/10.1162/IMAG.a.1122"
