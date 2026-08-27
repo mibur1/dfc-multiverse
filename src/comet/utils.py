@@ -1,15 +1,10 @@
 import os
 import re
-import mat73
 import pickle
 import inspect
 import numpy as np
 import pandas as pd
-import nibabel as nib
 import importlib_resources
-from nilearn import signal
-from scipy.io import loadmat
-from sklearn.cluster import KMeans
 
 def load_timeseries(path=None):
     """
@@ -27,6 +22,8 @@ def load_timeseries(path=None):
         time series data
     """
 
+    from scipy.io import loadmat
+
     if path is None:
         raise ValueError("Please provide a path to the time series data")
 
@@ -42,6 +39,7 @@ def load_timeseries(path=None):
             data = loadmat(path)
         except Exception as e:
             print("Error using scipy, using mat73 instead.", e)
+            import mat73
             data = mat73.loadmat(path)
     elif path.endswith(".tsv"):
         data = pd.read_csv(path, sep='\t', header=None, na_values='n/a')
@@ -117,6 +115,7 @@ def load_example(fname="time_series"):
         if fname.endswith(".txt"):
             data = np.loadtxt(path)
         elif fname.endswith(".mat"):
+            import mat73
             data = mat73.loadmat(path)
         elif fname.endswith(".tsv"):
             data = pd.read_csv(path, sep="\t")
@@ -132,12 +131,14 @@ def load_testdata(data=None):
     Load test data for unit tests.
     """
     if data in ["graph", "connectivity"]:
+        from scipy.io import loadmat
         fname = f"{data}.mat"
         
         with importlib_resources.path("comet.data.tests", fname) as file_path:
             data = loadmat(file_path)
 
     elif data == "cifti":
+        import nibabel as nib
         fname = f"{data}.dtseries.nii"
 
         with importlib_resources.path("comet.data.tests", fname) as file_path:
@@ -236,6 +237,7 @@ def clean(time_series, detrend=False, confounds=None, standardize=False, standar
     data : TxP np.ndarray
         cleaned time series data
     """
+    from nilearn import signal
 
     return signal.clean(time_series, detrend=detrend, confounds=confounds, standardize=standardize, standardize_confounds=standardize_confounds, \
                         filter=filter, low_pass=low_pass, high_pass=high_pass, t_r=t_r, ensure_finite=ensure_finite)
@@ -296,6 +298,8 @@ def kmeans_cluster(
     inertia : float
         Inertia of the final (group) k-means.
     """
+    from sklearn.cluster import KMeans
+
     X_dfc = np.asarray(dfc)
     if X_dfc.ndim == 3:
         # (P,P,T) -> (T,P,P)
@@ -511,7 +515,7 @@ def switch_rate(labels: np.ndarray) -> float:
     T = labels.size
     return num_transitions(labels) / max(T - 1, 1)
 
-def state_plots(states=None, state_tc=None, summary=None, sub_ids=None, figsize=None):
+def state_plots(states=None, state_tc=None, summary=None, sub_ids=None, figsize=None, transparent=False):
     from matplotlib import pyplot as plt
 
     if states is not None:
@@ -572,6 +576,12 @@ def state_plots(states=None, state_tc=None, summary=None, sub_ids=None, figsize=
         ax[1].set_xticks(range(K), [f"S{k}" for k in range(1,K+1)])
         ax[1].set_yticks(range(K), [f"S{k}" for k in range(1,K+1)])
         ax[1].set_title("Transition matrix (group mean)")
+
+    # Transparent background (the returned figure keeps it when saved with savefig)
+    if transparent:
+        fig.patch.set_alpha(0.0)
+        for axis in np.atleast_1d(ax).ravel():
+            axis.patch.set_alpha(0.0)
 
     plt.tight_layout()
     return fig, ax

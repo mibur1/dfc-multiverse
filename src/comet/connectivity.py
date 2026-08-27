@@ -6,10 +6,6 @@ from typing import Literal, Union
 from abc import ABCMeta, abstractmethod
 from joblib import Parallel, delayed
 from threadpoolctl import threadpool_limits
-from statsmodels.stats.weightstats import DescrStatsW
-from pycwt import cwt, Morlet
-from hmmlearn import hmm
-from ksvd import ApproximateKSVD
 from sklearn.cluster import KMeans
 from sklearn.metrics import mutual_info_score
 from sklearn.covariance import LedoitWolf
@@ -260,6 +256,8 @@ class SlidingWindow(ConnectivityMethod):
         np.ndarray
             Dynamic functional connectivity as a PxPxN array.
         """
+        from statsmodels.stats.weightstats import DescrStatsW
+
         weights = self._weights()
 
         for estimate in range(self.N_estimates):
@@ -445,6 +443,8 @@ class SpatialDistance(ConnectivityMethod):
         np.ndarray
             Dynamic functional connectivity as a PxPxN array.
         """
+        from statsmodels.stats.weightstats import DescrStatsW
+
         weights = self._weights() # in this case this is the distance matrix
 
         for estimate in range(self.N_estimates):
@@ -948,6 +948,8 @@ class WaveletCoherence(ConnectivityMethod):
         np.ndarray
             Dynamic functional connectivity as a PxPxN array.
         """
+        from pycwt import cwt, Morlet
+
         # Time series dimensions
         P = self.time_series.shape[1]
         T = self.time_series.shape[0]
@@ -1525,6 +1527,8 @@ class KSVD(ConnectivityMethod):
         np.ndarray
             Connectivity states (P x P x n_states)
         """
+        from ksvd import ApproximateKSVD
+
         # Estimate states
         aksvd = ApproximateKSVD(n_components=self.n_states, transform_n_nonzero_coefs=1)
         dictionary = np.asarray(aksvd.fit(self.time_series).components_)
@@ -1665,6 +1669,8 @@ class ContinuousHMM(ConnectivityMethod):
         np.ndarray
             Connectivity states (P x P x n_states)
         """
+        from hmmlearn import hmm
+
         models, scores = [], []
         for _ in tqdm(range(self.hmm_iter), disable=not self.progress_bar, desc="Continuous HMM", dynamic_ncols=True):
             model = hmm.GaussianHMM(n_components=self.n_states, covariance_type="full")
@@ -1752,6 +1758,8 @@ class DiscreteHMM(ConnectivityMethod):
         np.ndarray
             Connectivity states (P x P x n_states)
         """
+        from hmmlearn import hmm
+
         # Run sliding window clustering
         n_cluster_states = int(self.n_states * self.state_ratio)
         state_tc, states = SlidingWindowClustering(self.time_series,

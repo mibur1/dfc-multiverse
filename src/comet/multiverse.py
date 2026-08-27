@@ -16,7 +16,6 @@ import networkx as nx
 from scipy import stats
 from jinja2 import Template
 from tqdm.auto import tqdm
-from matplotlib import transforms
 from collections import defaultdict
 from matplotlib import pyplot as plt
 from matplotlib import lines as mlines
@@ -748,7 +747,8 @@ class Multiverse:
             max_label_len=15,
             label_offset=0.04,
             cmap="Set2",
-            exclude_single=False
+            exclude_single=False,
+            transparent=False
         ):
         """
         Visualize the multiverse as a network.
@@ -773,6 +773,8 @@ class Multiverse:
             Colormap to use for the nodes. Default is "Set2".
         exclude_single : bool
             Whether to exclude parameters with only one unique option.
+        transparent : bool
+            Whether to save the figure with a transparent background. Default is False.
         """
         # Read the CSV summary into a DataFrame.
         multiverse_summary = self._read_summary()
@@ -913,7 +915,7 @@ class Multiverse:
                             horizontalalignment="center", fontsize=text_size, fontweight="bold")
 
         # Save the figure to the results directory.
-        plt.savefig(f"{self.results_dir}/multiverse.png", bbox_inches="tight")
+        plt.savefig(f"{self.results_dir}/multiverse.png", bbox_inches="tight", transparent=transparent)
 
         return self._handle_figure_returns(fig)
 
@@ -929,12 +931,13 @@ class Multiverse:
             linewidth: float = 2,
             figsize: tuple | None = None,
             height_ratio: tuple = (2, 1),
+            row_height: float = 0.22,
             fontsize: int = 10,
             dotsize: int = 50,
-            line_pad: float = 0.3,
             fname: str = "specification_curve",
             ftype: str = "pdf",
             dpi: int = 300,
+            transparent: bool = False,
             p_threshold: float = 0.05,
             ci_level_default: int = 95,
         ):
@@ -949,6 +952,11 @@ class Multiverse:
             - If `ci` is int or True, `measure` must contain list/array samples per universe.
             - If `p_value` is a string, it is interpreted as a p-value column (numeric) or a significance flag (bool).
             - If `ci` is a string, it must contain per-universe (lower, upper) bounds.
+            - If `transparent` is True, the saved figure has a transparent background.
+            - If `figsize` is None, the figure is sized from the decision panel: every row
+              (decision name, option, or the blank row between decisions) gets `row_height`
+              inches and the top panel follows from `height_ratio`. Passing `figsize`
+              explicitly fixes the height instead, so rows get thinner as decisions are added.
 
         Returns
         -------
@@ -1118,23 +1126,16 @@ class Multiverse:
             ci_upper = np.asarray(highs, dtype=float)
 
         # ------------------------------------------------------------
-        # Figure size (auto if None)
-        if title is None:
-            title = "Specification Curve"
-
-        if figsize is None:
-            num_options = sum(df[c].nunique(dropna=True) for c in decision_cols)
-            figsize = (max(8, n * 0.07), max(6, num_options * 0.35))
-
-        # ------------------------------------------------------------
-        # Bottom panel layout (decision order enforced; options order-of-appearance)
+        # Bottom panel layout (decision order enforced; options order-of-appearance).
+        # Every row is one unit high, just like the strips of multiverse_plot(): a blank
+        # row, then the decision name in bold, then one row per option. Keeping the rows
+        # uniform is what makes the panel scale - the row count drives the panel height
+        # below instead of the rows being squeezed into a fixed one.
         decision_positions = {}
         display_labels = []
         yticks = []
-        line_ends = []
-        key_positions = {}
+        header_ticks = []
         y_max = 0
-        space_between_groups = 1
 
         num_groups = len(decision_cols)
         cmap_obj = plt.cm.get_cmap(cmap, num_groups if num_groups > 0 else 1)
@@ -1144,8 +1145,13 @@ class Multiverse:
             options = pd.unique(df[decision].astype("object"))
             options = [o for o in options if pd.notna(o)]
 
-            group_label = _map_name(decision)
-            key_positions[group_label] = y_max + len(options) / 2.0 - 0.5
+            if group_idx > 0:
+                y_max += 1  # blank row separating this decision from the previous one
+
+            header_ticks.append(len(yticks))
+            yticks.append(y_max)
+            display_labels.append(_map_name(decision))
+            y_max += 1
 
             for opt in options:
                 yticks.append(y_max)
@@ -1153,8 +1159,17 @@ class Multiverse:
                 decision_positions[(decision, opt)] = (y_max, group_idx)
                 y_max += 1
 
-            line_ends.append(y_max)
-            y_max += space_between_groups
+        # ------------------------------------------------------------
+        # Figure size (auto if None). The bottom panel gets a fixed amount of height per
+        # row, and the top panel follows from height_ratio, so a multiverse with more
+        # decisions or options yields a taller figure rather than thinner rows.
+        if title is None:
+            title = "Specification Curve"
+
+        if figsize is None:
+            bottom_height = max(2.0, (y_max + 1) * row_height)
+            top_height = bottom_height * (height_ratio[0] / height_ratio[1])
+            figsize = (float(np.clip(n * 0.07, 8, 20)), bottom_height + top_height)
 
         # ------------------------------------------------------------
         # Plot
@@ -1166,48 +1181,20 @@ class Multiverse:
         # Bottom axes setup
         ax[1].set_yticks(yticks)
         ax[1].set_yticklabels(display_labels, fontsize=fontsize)
-        ax[1].tick_params(axis="y", labelsize=fontsize)
+        ax[1].tick_params(axis="y", labelsize=fontsize, length=0)
         ax[1].set_ylim(-1, y_max)
         ax[1].xaxis.grid(False)
         ax[1].invert_yaxis()
 
-        # Left padding for group labels/lines
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
+        # Decision names in bold, without a grid line as they hold no markers
+        header_set = set(header_ticks)
+        ticklabels = ax[1].get_yticklabels()
+        for i in header_set:
+            ticklabels[i].set_fontweight("bold")
 
-        trans1 = transforms.blended_transform_factory(ax[1].transAxes, ax[1].transData)
-        tick_extents = [lbl.get_window_extent(renderer=renderer) for lbl in ax[1].get_yticklabels()]
-        max_extent = max(tick_extents, key=lambda bb: bb.width)
-        x_start_pixel = max_extent.x0
-        x_start_axes1 = ax[1].transAxes.inverted().transform((x_start_pixel, 0))[0]
-
-        trans0 = transforms.blended_transform_factory(ax[0].transAxes, ax[0].transData)
-        tick_extents0 = [lbl.get_window_extent(renderer=renderer) for lbl in ax[0].get_yticklabels()]
-        if tick_extents0:
-            max_extent0 = max(tick_extents0, key=lambda bb: bb.width)
-            x_start_pixel0 = max_extent0.x0
-            x_start_axes0 = ax[0].transAxes.inverted().transform((x_start_pixel0, 0))[0]
-        else:
-            x_start_axes0 = x_start_axes1
-
-        min_x_start_axes = min(x_start_axes1, x_start_axes0)
-        padding = -line_pad * min_x_start_axes
-        line_offset = min_x_start_axes - padding
-
-        # Group labels + separators
-        for key, pos in key_positions.items():
-            ax[1].text(
-                line_offset - padding, pos, key, transform=trans1,
-                ha="right", va="center", fontweight="bold", fontsize=fontsize
-            )
-
-        s = -0.5
-        for line_end in line_ends:
-            e = line_end - 0.5
-            ax[1].add_line(
-                mlines.Line2D([line_offset, line_offset], [s, e], color="black", lw=1, transform=trans1, clip_on=False)
-            )
-            s = line_end + 0.5
+        for i, gridline in enumerate(ax[1].get_ygridlines()):
+            if i in header_set:
+                gridline.set_visible(False)
 
         # Top scatter
         ax[0].scatter(x_values, y_values, c=top_colors, s=dotsize, edgecolors=top_colors, zorder=3)
@@ -1229,16 +1216,8 @@ class Multiverse:
             ax[0].hlines(float(baseline), xmin=-2, xmax=n + 1, linestyles="--", lw=2, colors="black", zorder=1)
             legend_items.append(mlines.Line2D([], [], linestyle="--", color="black", linewidth=2, label="Baseline"))
 
-        # Measure label + left line
-        ymin, ymax = ax[0].get_ylim()
-        ycenter = (ymin + ymax) / 2.0
-        ax[0].text(
-            line_offset - padding, ycenter, _map_name(measure), transform=trans0,
-            ha="right", va="center", fontweight="bold", fontsize=fontsize
-        )
-        ax[0].add_line(
-            mlines.Line2D([line_offset, line_offset], [ymin, ymax], color="black", lw=1, transform=trans0, clip_on=False)
-        )
+        # Measure label
+        ax[0].set_ylabel(_map_name(measure), fontweight="bold", fontsize=fontsize)
 
         # Bottom markers (vectorised melt)
         long = df[decision_cols].reset_index().melt(
@@ -1295,7 +1274,7 @@ class Multiverse:
         if legend_items:
             ax[0].legend(handles=legend_items, loc="upper left", fontsize=fontsize, frameon=False)
 
-        plt.savefig(f"{self.results_dir}/{fname}.{ftype}", bbox_inches="tight", dpi=dpi)
+        plt.savefig(f"{self.results_dir}/{fname}.{ftype}", bbox_inches="tight", dpi=dpi, transparent=transparent)
         sns.reset_orig()
         return self._handle_figure_returns(fig)
 
@@ -1312,6 +1291,7 @@ class Multiverse:
             fname: str = "multiverse_plot",
             ftype: str = "pdf",
             dpi: int = 300,
+            transparent: bool = False,
         ):
         """
         Multiverse plot as introduced by Krähmer & Young (2026).
@@ -1369,6 +1349,8 @@ class Multiverse:
             File type used when saving the figure (e.g., ``"pdf"``, ``"png"``).
         dpi : int, optional
             Resolution (dots per inch) used when saving the figure.
+        transparent : bool, optional
+            Whether to save the figure with a transparent background. Default is False.
 
         Returns
         -------
@@ -1595,7 +1577,14 @@ class Multiverse:
                 for b in range(len(breaks) - 1):
                     H[i_level + 2, b] = prop_by_bin.get(b, 0.0)
 
-            cmap = LinearSegmentedColormap.from_list("white_to_color", [(1, 1, 1), base_colors[varname]])
+            if transparent:
+                # Ramp the alpha rather than blending towards white, so that empty cells stay
+                # see-through. Composited on white this is identical to the white -> colour ramp.
+                cmap = LinearSegmentedColormap.from_list(
+                    "clear_to_color", [(*base_colors[varname], 0.0), (*base_colors[varname], 1.0)]
+                )
+            else:
+                cmap = LinearSegmentedColormap.from_list("white_to_color", [(1, 1, 1), base_colors[varname]])
             X = breaks
             Y = np.arange(n_levels + 3)  # edges
             ax.pcolormesh(X, Y, H, shading="flat", cmap=cmap, vmin=0.0, vmax=1.0)
@@ -1650,7 +1639,7 @@ class Multiverse:
         #    bottom_xaxis.axvline(baseline, linestyle="--", linewidth=1, color="black", zorder=10)
 
         # Save and return
-        plt.savefig(f"{self.results_dir}/{fname}.{ftype}", bbox_inches="tight", dpi=dpi)  
+        plt.savefig(f"{self.results_dir}/{fname}.{ftype}", bbox_inches="tight", dpi=dpi, transparent=transparent)
         return self._handle_figure_returns(fig)
 
     def plot_integration(self,
@@ -1664,7 +1653,8 @@ class Multiverse:
             title=None,
             fname="density",
             ftype="pdf",
-            dpi=300):
+            dpi=300,
+            transparent=False):
         """
         Plot weighted density distributions of a measure for each integration scheme.
 
@@ -1678,8 +1668,9 @@ class Multiverse:
             If given, a vertical reference line is drawn at this value.
         agg : string
             Per-universe aggregation for sequence-valued measures (see ``integrate``).
-        xlim, figsize, title, fname, ftype, dpi
+        xlim, figsize, title, fname, ftype, dpi, transparent
             Plot/save options. The figure is saved to the results directory as ``fname.ftype``.
+            ``transparent=True`` saves it with a transparent background.
 
         Returns
         -------
@@ -1716,7 +1707,7 @@ class Multiverse:
 
         ax.legend()
         plt.tight_layout()
-        plt.savefig(f"{self.results_dir}/{fname}.{ftype}", bbox_inches="tight", dpi=dpi)
+        plt.savefig(f"{self.results_dir}/{fname}.{ftype}", bbox_inches="tight", dpi=dpi, transparent=transparent)
         return self._handle_figure_returns(fig)
 
     # Internal methods

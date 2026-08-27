@@ -412,7 +412,8 @@ def surface_plot(node_values : np.ndarray|None=None,
                  colorbar: None|str="bottom",
                  colorbar_label : str|None=None,
                  interactive : bool=True,
-                 fname : str|None=None):
+                 fname : str|None=None,
+                 transparent : bool=False):
     """
     Plot cortical hemispheres with optional parcel border overlays.
 
@@ -472,6 +473,9 @@ def surface_plot(node_values : np.ndarray|None=None,
         The name should contain the desired file type with the options being:    
         - Raster: ".png", ".jpeg", ".jpg", ".bmp", ".tif", ".tiff"  
         - Vectorised: ".svg", ".eps", ".ps", ".pdf", ".tex"  
+    transparent : bool
+        Save the plot with a transparent background. Raster formats only, as the vectorised
+        export has no transparency support. Default is False.
     """
     # Input validation / normalization
     if node_values is None:
@@ -678,9 +682,11 @@ def surface_plot(node_values : np.ndarray|None=None,
     # Save the figure
     if fname is not None:
         if fname.endswith(("svg", "pdf", "eps", "ps")):
+            if transparent:
+                print("Warning: transparent backgrounds are not supported for vectorised output, saving opaque.")
             pl.save_graphic(fname, raster=False)
         elif fname.endswith(("png", "jpeg", "jpg", "bmp", "tif", "tiff")):
-            pl.screenshot(fname)
+            pl.screenshot(fname, transparent_background=transparent)
     else:
         pass
    
@@ -705,7 +711,8 @@ def subcortical_plot(node_values: np.ndarray | list[float] | None = None,
                      colorbar: None | str = "bottom",
                      colorbar_label: str | None = None,
                      interactive: bool = True,
-                     fname: str | None = None):
+                     fname: str | None = None,
+                     transparent: bool = False):
     """
     Plot Tian subcortical structures for scale ``S1`` to ``S4``.
 
@@ -713,6 +720,9 @@ def subcortical_plot(node_values: np.ndarray | list[float] | None = None,
     the first N values are used automatically, where N is the number of Tian meshes for that scale.
     The combined atlases place the subcortical parcels in the leading columns, and both the parcels
     and the meshes are ordered by Tian region id, so the i-th value maps to the i-th mesh.
+
+    ``transparent=True`` saves the plot with a transparent background. Raster formats only,
+    as the vectorised export has no transparency support.
     """
     meshes = _get_subcortical(scale=scale, smooth_iter=smooth_iter, smooth_relaxation=smooth_relaxation)
     mesh_names = sorted(meshes)
@@ -839,9 +849,11 @@ def subcortical_plot(node_values: np.ndarray | list[float] | None = None,
 
     if fname is not None:
         if fname.endswith(("svg", "pdf", "eps", "ps")):
+            if transparent:
+                print("Warning: transparent backgrounds are not supported for vectorised output, saving opaque.")
             pl.save_graphic(fname, raster=False)
         elif fname.endswith(("png", "jpeg", "jpg", "bmp", "tif", "tiff")):
-            pl.screenshot(fname)
+            pl.screenshot(fname, transparent_background=transparent)
 
     return pl.close()
 
