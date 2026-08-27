@@ -29,11 +29,6 @@
    :target: https://coveralls.io/github/mibur1/comet?branch=main
    :alt: Coverage Status
 
-.. image:: https://zenodo.org/badge/745942040.svg
-   :target: https://doi.org/10.5281/zenodo.21363315
-   :alt: Zenodo Badge
-
-
 .. raw:: html
 
     <br><br>
