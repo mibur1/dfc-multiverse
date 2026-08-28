@@ -3317,7 +3317,7 @@ class App(QMainWindow):
         self.boldCanvas.draw()
 
     def plotLogo(self, figure=None):
-        with importlib_resources.path("comet.data.img", "logo.png") as file_path:
+        with importlib_resources.path("comet.data.img", "logo.jpeg") as file_path:
             logo = imread(file_path)
 
         figure.clear()

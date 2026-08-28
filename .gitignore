@@ -3,7 +3,8 @@
 
 # Custom files and folders
 testing_stuff/
-src/comet/data/img/
+reviews/
+.claude/
 
 src/comet/data/atlas/*
 !src/comet/data/atlas/__init__.py
