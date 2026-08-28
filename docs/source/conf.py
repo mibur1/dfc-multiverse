@@ -19,7 +19,8 @@ extensions = [
     'nbsphinx',
 ]
 templates_path = ['_templates']
-exclude_patterns = []
+# Notebooks that are kept in the repository but deliberately left out of the docs
+exclude_patterns = ['sections/notebooks/example_mv_eeg_sim.ipynb']
 
 # -- Options for HTML output -------------------------------------------------
 html_theme = 'sphinx_rtd_theme'
