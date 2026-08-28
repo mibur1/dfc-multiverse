@@ -14,8 +14,10 @@ import pandas as pd
 import seaborn as sns
 import networkx as nx
 from scipy import stats
+from typing import Literal
 from jinja2 import Template
 from tqdm.auto import tqdm
+from matplotlib import transforms
 from collections import defaultdict
 from matplotlib import pyplot as plt
 from matplotlib import lines as mlines
@@ -932,6 +934,8 @@ class Multiverse:
             figsize: tuple | None = None,
             height_ratio: tuple = (2, 1),
             row_height: float = 0.22,
+            label_pos: Literal["top", "left"] = "top",
+            line_pad: float = 0.3,
             fontsize: int = 10,
             dotsize: int = 50,
             fname: str = "specification_curve",
@@ -953,6 +957,9 @@ class Multiverse:
             - If `p_value` is a string, it is interpreted as a p-value column (numeric) or a significance flag (bool).
             - If `ci` is a string, it must contain per-universe (lower, upper) bounds.
             - If `transparent` is True, the saved figure has a transparent background.
+            - `label_pos` places the decision names either above their options ("top", the
+              default, which is compact horizontally) or in a separate column to the left of
+              them, joined by a vertical rule ("left"). `line_pad` only applies to "left".
             - If `figsize` is None, the figure is sized from the decision panel: every row
               (decision name, option, or the blank row between decisions) gets `row_height`
               inches and the top panel follows from `height_ratio`. Passing `figsize`
@@ -1127,15 +1134,33 @@ class Multiverse:
 
         # ------------------------------------------------------------
         # Bottom panel layout (decision order enforced; options order-of-appearance).
-        # Every row is one unit high, just like the strips of multiverse_plot(): a blank
-        # row, then the decision name in bold, then one row per option. Keeping the rows
-        # uniform is what makes the panel scale - the row count drives the panel height
-        # below instead of the rows being squeezed into a fixed one.
+        # The rows follow the strips of multiverse_plot(): a blank row, the decision name in
+        # bold, then one row per option. A row is one unit high per line of its label, so
+        # multiline labels (e.g. from name_map) claim the space they need instead of running
+        # into their neighbours. The unit count drives the panel height below, which is what
+        # keeps the layout from being squeezed as decisions are added.
+        if label_pos not in ("top", "left"):
+            raise ValueError(f"label_pos must be 'top' or 'left', got {label_pos!r}.")
+
         decision_positions = {}
         display_labels = []
         yticks = []
-        header_ticks = []
+        header_ticks = []   # indices of the decision-name rows ("top" only)
+        key_positions = {}  # decision name -> y of its options block ("left" only)
+        line_ends = []      # end of each group's separator rule ("left" only)
         y_max = 0
+        space_between_groups = 1.0  # blank space before the next decision
+        label_pad = 0.3             # extra space between a decision name and its options ("top")
+
+        def _add_row(label):
+            """Reserve one unit per line of the label and return the centre of that block."""
+            nonlocal y_max
+            height = str(label).count("\n") + 1
+            centre = y_max + (height - 1) / 2.0
+            yticks.append(centre)
+            display_labels.append(label)
+            y_max += height
+            return centre
 
         num_groups = len(decision_cols)
         cmap_obj = plt.cm.get_cmap(cmap, num_groups if num_groups > 0 else 1)
@@ -1146,18 +1171,21 @@ class Multiverse:
             options = [o for o in options if pd.notna(o)]
 
             if group_idx > 0:
-                y_max += 1  # blank row separating this decision from the previous one
+                y_max += space_between_groups
 
-            header_ticks.append(len(yticks))
-            yticks.append(y_max)
-            display_labels.append(_map_name(decision))
-            y_max += 1
+            if label_pos == "top":
+                header_ticks.append(len(yticks))
+                _add_row(_map_name(decision))
+                y_max += label_pad
 
+            group_start = y_max
             for opt in options:
-                yticks.append(y_max)
-                display_labels.append(_map_level(decision, opt))
-                decision_positions[(decision, opt)] = (y_max, group_idx)
-                y_max += 1
+                decision_positions[(decision, opt)] = (_add_row(_map_level(decision, opt)), group_idx)
+
+            if label_pos == "left":
+                # Centre the decision name on the block of options it belongs to
+                key_positions[_map_name(decision)] = (group_start + y_max - 1) / 2.0
+                line_ends.append(y_max)
 
         # ------------------------------------------------------------
         # Figure size (auto if None). The bottom panel gets a fixed amount of height per
@@ -1175,7 +1203,8 @@ class Multiverse:
         # Plot
         sns.set_theme(style="whitegrid")
         fig, ax = plt.subplots(
-            2, 1, figsize=figsize, gridspec_kw={"height_ratios": height_ratio}, sharex=True
+            2, 1, figsize=figsize, sharex=True,
+            gridspec_kw={"height_ratios": height_ratio, "hspace": 0.1}  # half the Matplotlib default
         )
 
         # Bottom axes setup
@@ -1186,15 +1215,55 @@ class Multiverse:
         ax[1].xaxis.grid(False)
         ax[1].invert_yaxis()
 
-        # Decision names in bold, without a grid line as they hold no markers
-        header_set = set(header_ticks)
-        ticklabels = ax[1].get_yticklabels()
-        for i in header_set:
-            ticklabels[i].set_fontweight("bold")
+        line_offset = padding = None
+        trans0 = transforms.blended_transform_factory(ax[0].transAxes, ax[0].transData)
 
-        for i, gridline in enumerate(ax[1].get_ygridlines()):
-            if i in header_set:
-                gridline.set_visible(False)
+        if label_pos == "top":
+            # Decision names in bold, without a grid line as they hold no markers
+            header_set = set(header_ticks)
+            ticklabels = ax[1].get_yticklabels()
+            for i in header_set:
+                ticklabels[i].set_fontweight("bold")
+
+            for i, gridline in enumerate(ax[1].get_ygridlines()):
+                if i in header_set:
+                    gridline.set_visible(False)
+        else:
+            # Decision names in their own column left of the options, joined by a vertical
+            # rule. The column starts left of the longest tick label, which is only known
+            # once the figure has been laid out.
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+
+            trans1 = transforms.blended_transform_factory(ax[1].transAxes, ax[1].transData)
+            tick_extents = [lbl.get_window_extent(renderer=renderer) for lbl in ax[1].get_yticklabels()]
+            max_extent = max(tick_extents, key=lambda bb: bb.width)
+            x_start_axes1 = ax[1].transAxes.inverted().transform((max_extent.x0, 0))[0]
+
+            tick_extents0 = [lbl.get_window_extent(renderer=renderer) for lbl in ax[0].get_yticklabels()]
+            if tick_extents0:
+                max_extent0 = max(tick_extents0, key=lambda bb: bb.width)
+                x_start_axes0 = ax[0].transAxes.inverted().transform((max_extent0.x0, 0))[0]
+            else:
+                x_start_axes0 = x_start_axes1
+
+            min_x_start_axes = min(x_start_axes1, x_start_axes0)
+            padding = -line_pad * min_x_start_axes
+            line_offset = min_x_start_axes - padding
+
+            for key, pos in key_positions.items():
+                ax[1].text(
+                    line_offset - padding, pos, key, transform=trans1,
+                    ha="right", va="center", fontweight="bold", fontsize=fontsize
+                )
+
+            start = -0.5
+            for line_end in line_ends:
+                ax[1].add_line(
+                    mlines.Line2D([line_offset, line_offset], [start, line_end - 0.5],
+                                  color="black", lw=1, transform=trans1, clip_on=False)
+                )
+                start = line_end + space_between_groups - 0.5
 
         # Top scatter
         ax[0].scatter(x_values, y_values, c=top_colors, s=dotsize, edgecolors=top_colors, zorder=3)
@@ -1217,7 +1286,18 @@ class Multiverse:
             legend_items.append(mlines.Line2D([], [], linestyle="--", color="black", linewidth=2, label="Baseline"))
 
         # Measure label
-        ax[0].set_ylabel(_map_name(measure), fontweight="bold", fontsize=fontsize)
+        if label_pos == "top":
+            ax[0].set_ylabel(_map_name(measure), fontweight="bold", fontsize=fontsize)
+        else:
+            ymin, ymax = ax[0].get_ylim()
+            ax[0].text(
+                line_offset - padding, (ymin + ymax) / 2.0, _map_name(measure), transform=trans0,
+                ha="right", va="center", fontweight="bold", fontsize=fontsize
+            )
+            ax[0].add_line(
+                mlines.Line2D([line_offset, line_offset], [ymin, ymax],
+                              color="black", lw=1, transform=trans0, clip_on=False)
+            )
 
         # Bottom markers (vectorised melt)
         long = df[decision_cols].reset_index().melt(
@@ -2008,9 +2088,9 @@ class Multiverse:
             if bad:
                 bad_names = [d.replace("__", "", 1) for d in bad]
                 print(
-                    f"[warn] Decision design is not fully crossed: {bad_names} are untestable for "
-                    f"some universes, so MLI compares neighbourhoods of unequal coverage and is "
-                    f"biased toward universes blind to those dimensions. Consider method='mli_restricted'."
+                    f"\033[1;33m[warn]\033[0m Decision design is not fully crossed: {bad_names} are untestable for\n"
+                    f"some universes, so MLI compares neighbourhoods of unequal coverage and is biased towards\n"
+                    f"universes blind to those dimensions. Consider method='mli_restricted'."
                 )
             return self._mli_weights(results, measure, agg=agg, restricted=False)
         elif method == "mli_restricted":

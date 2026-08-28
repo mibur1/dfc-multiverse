@@ -21,7 +21,6 @@ def load_timeseries(path=None):
     data : TxP np.ndarray
         time series data
     """
-
     from scipy.io import loadmat
 
     if path is None:
@@ -87,12 +86,14 @@ def load_example(fname="time_series"):
     Parameters
     ----------
     fname : str, optional
-        File name for any of the included data
-        - 'time_series':    Parcellated BOLD time series data (default)
-        - 'simulation':     Simulated time series data for the tutorial
-        - 'hurricane':      Hurricane data from https://osf.io/9rvps/ (cleaned columns)
-        - 'cantone':        Data as used in Cantone & Tomaselli (2024): https://doi.org/10.1007/s11634-024-00610-9
-                            Downloaded from Del Giudice and Gangestad (2021): https://doi.org/10.6084/m9.figshare.12089736
+        File name for any of the included data:
+
+        - 'time_series': Parcellated BOLD time series data (default)
+        - 'simulation': Simulated time series data for the tutorial
+        - 'hurricane': Hurricane data from https://osf.io/9rvps/ (cleaned columns)
+        - 'cantone': Data as used in Cantone & Tomaselli (2024):
+          https://doi.org/10.1007/s11634-024-00610-9. Downloaded from Del Giudice and
+          Gangestad (2021): https://doi.org/10.6084/m9.figshare.12089736
 
     Returns
     -------
